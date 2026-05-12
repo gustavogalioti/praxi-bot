@@ -7,7 +7,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ─── In-memory stores ────────────────────────────────────────────────────────
@@ -175,6 +175,108 @@ async function generateInsight(prompt, patientId, context) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+
+// Privacy policy
+app.get("/privacy", (_req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Política de Privacidade — Praxi Bot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #1a1a2e; line-height: 1.7; }
+    header { background: #0d6efd; color: #fff; padding: 48px 24px 36px; text-align: center; }
+    header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+    header p  { font-size: 1rem; opacity: 0.85; }
+    main { max-width: 780px; margin: 40px auto; padding: 0 24px 60px; }
+    section { margin-bottom: 40px; }
+    h2 { font-size: 1.2rem; font-weight: 700; color: #0d6efd; border-left: 4px solid #0d6efd; padding-left: 12px; margin-bottom: 14px; }
+    p { margin-bottom: 12px; font-size: 0.97rem; }
+    ul { padding-left: 20px; margin-bottom: 12px; }
+    ul li { margin-bottom: 6px; font-size: 0.97rem; }
+    .badge { display: inline-block; background: #e8f0fe; color: #0d6efd; font-size: 0.82rem; font-weight: 600; padding: 2px 10px; border-radius: 20px; margin-bottom: 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 28px 32px; box-shadow: 0 2px 12px rgba(0,0,0,.07); }
+    .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+    .contact-item { background: #f0f4ff; border-radius: 8px; padding: 14px 18px; }
+    .contact-item strong { display: block; font-size: 0.82rem; color: #555; margin-bottom: 2px; }
+    .contact-item span { font-size: 0.95rem; color: #0d6efd; }
+    footer { text-align: center; padding: 24px; font-size: 0.82rem; color: #888; border-top: 1px solid #e0e0e0; }
+    @media (max-width: 520px) { header h1 { font-size: 1.5rem; } .contact-grid { grid-template-columns: 1fr; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Política de Privacidade</h1>
+  <p>Praxi Bot — Assistente WhatsApp para médicos e clínicas no Brasil</p>
+</header>
+<main>
+  <section><div class="card">
+    <span class="badge">Última atualização: maio de 2026</span>
+    <p>A <strong>Praxi Bot</strong> é uma solução de suporte à decisão clínica via WhatsApp, desenvolvida para auxiliar médicos e clínicas no Brasil. Esta Política de Privacidade descreve quais dados coletamos, como os utilizamos e como protegemos suas informações, em conformidade com a <strong>Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018)</strong>.</p>
+    <p>Ao utilizar a Praxi Bot, você concorda com os termos descritos nesta política.</p>
+  </div></section>
+  <section><h2>1. Dados que Coletamos</h2><div class="card">
+    <p>Durante a conversa com a Praxi Bot, coletamos as seguintes informações fornecidas voluntariamente:</p>
+    <ul>
+      <li><strong>Nome completo</strong> — para identificação do paciente ou profissional.</li>
+      <li><strong>Data de nascimento</strong> — para contextualização clínica.</li>
+      <li><strong>Cidade</strong> — para fins de localização e agendamento.</li>
+      <li><strong>Endereço de e-mail</strong> — para envio de lembretes e confirmações.</li>
+      <li><strong>Medicamentos em uso</strong> — para suporte à decisão clínica e verificação de interações medicamentosas.</li>
+      <li><strong>Consultas agendadas</strong> — data e horário das consultas escolhidas pelo usuário.</li>
+    </ul>
+    <p>Também registramos automaticamente as mensagens trocadas com o bot (conteúdo e horário) para fins de funcionamento do serviço e rastreabilidade.</p>
+  </div></section>
+  <section><h2>2. Como Usamos os Dados</h2><div class="card">
+    <p>Os dados coletados são utilizados exclusivamente para:</p>
+    <ul>
+      <li>Conduzir o fluxo de atendimento e coletar o cadastro do paciente;</li>
+      <li>Gerar <strong>insights clínicos personalizados</strong> com base no perfil do paciente, usando inteligência artificial (Anthropic Claude);</li>
+      <li>Oferecer e confirmar <strong>agendamentos</strong> em dias e horários disponíveis;</li>
+      <li>Enviar lembretes de consultas ao e-mail informado;</li>
+      <li>Melhorar a qualidade e a precisão do serviço.</li>
+    </ul>
+    <p><strong>Não vendemos, alugamos ou compartilhamos seus dados com terceiros</strong> para fins comerciais ou de marketing.</p>
+  </div></section>
+  <section><h2>3. Uso de Inteligência Artificial</h2><div class="card">
+    <p>A Praxi Bot utiliza o modelo de linguagem <strong>Claude (Anthropic)</strong> para gerar sugestões clínicas com base nos dados do paciente. As informações enviadas à API da Anthropic são tratadas conforme a <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener">Política de Privacidade da Anthropic</a>.</p>
+    <p><strong>Os insights gerados são apenas de suporte à decisão clínica</strong> e não substituem o julgamento profissional médico. Sempre consulte um profissional habilitado.</p>
+  </div></section>
+  <section><h2>4. Armazenamento e Segurança</h2><div class="card">
+    <p>Os dados são armazenados <strong>em memória durante a sessão ativa</strong>. Não utilizamos banco de dados persistente para as informações de conversa nesta versão do serviço. Isso significa que os dados são apagados automaticamente quando o servidor é reiniciado.</p>
+    <p>Adotamos medidas técnicas para proteger as informações transmitidas, incluindo comunicação via HTTPS e autenticação por token para o webhook.</p>
+  </div></section>
+  <section><h2>5. Seus Direitos (LGPD)</h2><div class="card">
+    <p>Nos termos da LGPD, você tem direito a:</p>
+    <ul>
+      <li>Confirmar a existência de tratamento dos seus dados;</li>
+      <li>Acessar os dados que temos sobre você;</li>
+      <li>Corrigir dados incompletos, inexatos ou desatualizados;</li>
+      <li>Solicitar a eliminação dos seus dados;</li>
+      <li>Revogar o consentimento a qualquer momento.</li>
+    </ul>
+    <p>Para exercer qualquer um desses direitos, entre em contato pelo e-mail abaixo.</p>
+  </div></section>
+  <section><h2>6. Contato</h2><div class="card">
+    <p>Em caso de dúvidas, solicitações ou exercício de direitos previstos na LGPD, entre em contato:</p>
+    <div class="contact-grid">
+      <div class="contact-item"><strong>Responsável</strong><span>Praxi Bot</span></div>
+      <div class="contact-item"><strong>E-mail</strong><span>privacidade@praxibot.com.br</span></div>
+      <div class="contact-item"><strong>WhatsApp</strong><span>+55 (11) 99999-9999</span></div>
+      <div class="contact-item"><strong>País de operação</strong><span>Brasil</span></div>
+    </div>
+  </div></section>
+  <section><div class="card">
+    <p>Esta política pode ser atualizada periodicamente. Recomendamos que você a revise regularmente. O uso continuado do serviço após alterações implica aceitação dos novos termos.</p>
+  </div></section>
+</main>
+<footer>&copy; 2026 Praxi Bot. Todos os direitos reservados. Operado em conformidade com a LGPD.</footer>
+</body>
+</html>`);
+});
 
 // Health
 app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
