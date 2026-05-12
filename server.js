@@ -1,6 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const Anthropic = require("@anthropic-ai/sdk");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(express.json());
@@ -8,6 +10,9 @@ app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+const JWT_SECRET = process.env.JWT_SECRET || "praxi_jwt_secret_change_in_production";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ─── In-memory stores ────────────────────────────────────────────────────────
@@ -15,6 +20,7 @@ const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY 
 const messages = [];
 const insightHistory = [];
 const sessions = {};
+const clients = {};
 
 const patients = {
   p001: {
@@ -172,6 +178,28 @@ async function generateInsight(prompt, patientId, context) {
   };
   insightHistory.push(record);
   return record;
+}
+
+// ─── Auth middleware ──────────────────────────────────────────────────────────
+
+function verifyJWT(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+  }
+  try {
+    req.user = jwt.verify(auth.slice(7), JWT_SECRET);
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -418,6 +446,103 @@ app.post("/api/simulate", (req, res) => {
     if (session.step === "complete") break;
   }
   res.json({ phone, turns: log.length, finalStep: log[log.length - 1]?.step, conversation: log });
+});
+
+// ─── Auth routes ──────────────────────────────────────────────────────────────
+
+// POST /api/auth/register — create a new client account
+app.post("/api/auth/register", async (req, res) => {
+  const { name, email, password, type, crm, specialty, phone, plan } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: "name, email and password are required" });
+  }
+  const existing = Object.values(clients).find(c => c.email === email);
+  if (existing) return res.status(409).json({ error: "Email already registered" });
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const id = `cl_${Date.now()}`;
+  const nextBillingDate = new Date();
+  nextBillingDate.setDate(nextBillingDate.getDate() + 30);
+
+  const client = {
+    id,
+    name,
+    email,
+    passwordHash,
+    type: type || "solo",
+    crm: crm || null,
+    specialty: specialty || null,
+    phone: phone || null,
+    createdAt: new Date().toISOString(),
+    status: "active",
+    plan: plan || "free",
+    nextBilling: nextBillingDate.toISOString(),
+  };
+  clients[id] = client;
+
+  const { passwordHash: _, ...safe } = client;
+  res.status(201).json(safe);
+});
+
+// POST /api/auth/login — returns JWT for clients and admin
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "email and password are required" });
+  }
+
+  // Admin check
+  if (ADMIN_EMAIL && ADMIN_PASSWORD && email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ role: "admin", email }, JWT_SECRET, { expiresIn: "8h" });
+    return res.json({ token, role: "admin", expiresIn: "8h" });
+  }
+
+  // Client check
+  const client = Object.values(clients).find(c => c.email === email);
+  if (!client) return res.status(401).json({ error: "Invalid credentials" });
+
+  const valid = await bcrypt.compare(password, client.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+
+  if (client.status === "suspended") {
+    return res.status(403).json({ error: "Account suspended. Contact support." });
+  }
+
+  const token = jwt.sign({ role: "client", id: client.id, email }, JWT_SECRET, { expiresIn: "8h" });
+  const { passwordHash: _, ...safe } = client;
+  res.json({ token, role: "client", expiresIn: "8h", client: safe });
+});
+
+// ─── Admin routes (JWT protected, admin only) ─────────────────────────────────
+
+// GET /api/admin/clients — list all registered clients
+app.get("/api/admin/clients", verifyJWT, adminOnly, (_req, res) => {
+  const all = Object.values(clients).map(({ passwordHash: _, ...c }) => c);
+  res.json({ clients: all, total: all.length });
+});
+
+// PATCH /api/admin/clients/:id — edit client email, plan, or status
+app.patch("/api/admin/clients/:id", verifyJWT, adminOnly, (req, res) => {
+  const client = clients[req.params.id];
+  if (!client) return res.status(404).json({ error: "Client not found" });
+
+  const { email, plan, status } = req.body;
+  if (email !== undefined) client.email = email;
+  if (plan !== undefined) client.plan = plan;
+  if (status !== undefined) client.status = status;
+
+  const { passwordHash: _, ...safe } = client;
+  res.json(safe);
+});
+
+// DELETE /api/admin/clients/:id — suspend client account
+app.delete("/api/admin/clients/:id", verifyJWT, adminOnly, (req, res) => {
+  const client = clients[req.params.id];
+  if (!client) return res.status(404).json({ error: "Client not found" });
+
+  client.status = "suspended";
+  const { passwordHash: _, ...safe } = client;
+  res.json({ message: "Client suspended successfully", client: safe });
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
