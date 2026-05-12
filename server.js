@@ -526,6 +526,30 @@ app.get("/api/clients/me", verifyJWT, (req, res) => {
   res.json(safe);
 });
 
+// PATCH /api/clients/me — update own profile fields
+app.patch("/api/clients/me", verifyJWT, (req, res) => {
+  if (req.user.role !== "client") {
+    return res.status(403).json({ error: "This route is for client accounts only" });
+  }
+  const client = clients[req.user.id];
+  if (!client) return res.status(404).json({ error: "Client not found" });
+
+  const allowed = ["name", "phone", "specialty", "crm"];
+  const updated = [];
+  for (const field of allowed) {
+    if (req.body[field] !== undefined) {
+      client[field] = req.body[field];
+      updated.push(field);
+    }
+  }
+  if (!updated.length) {
+    return res.status(400).json({ error: "No updatable fields provided", allowed });
+  }
+
+  const { passwordHash: _, ...safe } = client;
+  res.json({ updated, client: safe });
+});
+
 // ─── Admin routes (JWT protected, admin only) ─────────────────────────────────
 
 // GET /api/admin/clients — list all registered clients
