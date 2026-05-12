@@ -7,7 +7,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+const WEBHOOK_VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ─── In-memory stores ────────────────────────────────────────────────────────
