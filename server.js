@@ -513,6 +513,19 @@ app.post("/api/auth/login", async (req, res) => {
   res.json({ token, role: "client", expiresIn: "8h", client: safe });
 });
 
+// ─── Client self-service routes (JWT protected) ───────────────────────────────
+
+// GET /api/clients/me — return the authenticated client's own profile
+app.get("/api/clients/me", verifyJWT, (req, res) => {
+  if (req.user.role !== "client") {
+    return res.status(403).json({ error: "This route is for client accounts only" });
+  }
+  const client = clients[req.user.id];
+  if (!client) return res.status(404).json({ error: "Client not found" });
+  const { passwordHash: _, ...safe } = client;
+  res.json(safe);
+});
+
 // ─── Admin routes (JWT protected, admin only) ─────────────────────────────────
 
 // GET /api/admin/clients — list all registered clients
