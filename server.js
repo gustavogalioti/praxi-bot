@@ -323,7 +323,7 @@ app.get("/webhook", (req, res) => {
 // Webhook message intake + conversation flow
 app.post("/webhook", async (req, res) => {
   res.status(200).send("OK");
-
+console.log("WEBHOOK RECEBIDO:", JSON.stringify(req.body));
   const body = req.body;
   if (!body.object) return;
 
