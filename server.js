@@ -608,4 +608,24 @@ app.delete("/api/admin/clients/:id", verifyJWT, adminOnly, (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
+app.get("/api/register-phone", async (req, res) => {
+  try {
+    const response = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/register`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        pin: "000000"
+      }),
+    });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => console.log(`Praxi Bot running on port ${PORT}`));
