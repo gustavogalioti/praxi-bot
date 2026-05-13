@@ -320,19 +320,44 @@ app.get("/webhook", (req, res) => {
 });
 
 // Webhook message intake + conversation flow
-app.post("/webhook", (req, res) => {
-  const body = req.body;
-  const senderId = body.sender || "unknown";
-  const text = body.message || "";
-  const { reply, session } = processMessage(senderId, text);
-  const record = {
-    id: `msg_${Date.now()}`, senderId,
-    receivedAt: new Date().toISOString(), inbound: body, reply, step: session.step,
-  };
-  messages.push(record);
-  res.status(200).json({ status: "received", reply, step: session.step });
-});
+app.post("/webhook", async (req, res) => {
+  res.status(200).send("OK");
 
+  const body = req.body;
+  if (!body.object) return;
+
+  const entry = body.entry?.[0];
+  const change = entry?.changes?.[0];
+  const value = change?.value;
+  const message = value?.messages?.[0];
+
+  if (!message) return;
+
+  const from = message.from;
+  const text = message.text?.body || "";
+
+  if (!text) return;
+
+  const { reply } = processMessage(from, text);
+
+  try {
+    await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: from,
+        type: "text",
+        text: { body: reply },
+      }),
+    });
+  } catch (err) {
+    console.error("Erro ao enviar mensagem:", err.message);
+  }
+})
 // Webhook messages & sessions
 app.get("/api/webhook/messages", (req, res) => {
   const { sender, from, to } = req.query;
