@@ -84,71 +84,71 @@ function processMessage(senderId, text) {
 
   switch (session.step) {
     case "new":
-      reply = "👋 Hello! I'm Praxi Bot, your clinical assistant.\nTo get started, could I have your full name?";
+      reply = "👋 Olá! Sou o Praxi, seu assistente clínico.\nPara começar, qual é o seu nome completo?";
       session.step = "awaiting_name";
       break;
     case "awaiting_name":
-      if (!input) { reply = "Please enter your full name to continue."; break; }
+      if (!input) { reply = "Por favor, informe seu nome completo para continuar."; break; }
       session.profile.name = input;
-      reply = `Thanks, ${input}! 📋\nWhat is your date of birth? (e.g. MM/DD/YYYY)`;
+      reply = `Obrigado, ${input}! 📋\nQual é a sua data de nascimento? (ex: DD/MM/AAAA)`;
       session.step = "awaiting_dob";
       break;
     case "awaiting_dob":
-      if (!input) { reply = "Please enter your date of birth (MM/DD/YYYY)."; break; }
+      if (!input) { reply = "Por favor, informe sua data de nascimento (DD/MM/AAAA)."; break; }
       session.profile.dob = input;
-      reply = "Got it. 🏙️ What city do you live in?";
+      reply = "Entendido. 🏙️ Em qual cidade você mora?";
       session.step = "awaiting_city";
       break;
     case "awaiting_city":
-      if (!input) { reply = "Please enter your city."; break; }
+      if (!input) { reply = "Por favor, informe sua cidade."; break; }
       session.profile.city = input;
-      reply = "Great! What is your email address?";
+      reply = "Ótimo! Qual é o seu endereço de e-mail?";
       session.step = "awaiting_email";
       break;
     case "awaiting_email":
-      if (!input || !input.includes("@")) { reply = "Please enter a valid email address."; break; }
+      if (!input || !input.includes("@")) { reply = "Por favor, informe um endereço de e-mail válido."; break; }
       session.profile.email = input;
-      reply = "Thanks! 💊 Please list any current medications you're taking.\n(You can type them separated by commas, or type \"none\".)";
+      reply = "Obrigado! 💊 Por favor, liste os medicamentos que você usa atualmente.\n(Você pode digitá-los separados por vírgula, ou escrever \"nenhum\".)";
       session.step = "awaiting_medications";
       break;
     case "awaiting_medications":
-      if (!input) { reply = 'Please enter your current medications, or type "none".'; break; }
+      if (!input) { reply = "Por favor, informe seus medicamentos atuais, ou escreva \"nenhum\"."; break; }
       session.profile.medications = input;
       const slots = generateSlots(6);
       session.appointmentSlots = slots;
-      reply = "✅ Your profile is all set!\n\nHere are available appointment slots on Monday, Wednesday, and Friday:\n\n" +
+      reply = "✅ Seu cadastro está completo!\n\nAqui estão os horários disponíveis para consulta (segunda, quarta e sexta):\n\n" +
         slots.map(s => `  ${s.index}. ${s.label}`).join("\n") +
-        `\n\nReply with the number of your preferred slot (1–${slots.length}).`;
+        `\n\nResponda com o número do horário de sua preferência (1–${slots.length}).`;
       session.step = "awaiting_appointment";
       break;
     case "awaiting_appointment":
       const choice = parseInt(input, 10);
       const slotList = session.appointmentSlots || [];
       if (isNaN(choice) || choice < 1 || choice > slotList.length) {
-        reply = `Please reply with a number between 1 and ${slotList.length}.\n\n` +
+        reply = `Por favor, responda com um número entre 1 e ${slotList.length}.\n\n` +
           slotList.map(s => `  ${s.index}. ${s.label}`).join("\n");
         break;
       }
       const booked = slotList[choice - 1];
       session.bookedAppointment = booked;
-      reply = `🗓️ Confirmed! Your appointment is booked for:\n*${booked.label}*\n\n` +
-        `A reminder will be sent to ${session.profile.email}.\n\n` +
-        `Here's a summary of your profile:\n` +
-        `• Name: ${session.profile.name}\n• DOB: ${session.profile.dob}\n` +
-        `• City: ${session.profile.city}\n• Email: ${session.profile.email}\n` +
-        `• Medications: ${session.profile.medications}\n\nIs there anything else I can help you with?`;
+      reply = `🗓️ Confirmado! Sua consulta está agendada para:\n*${booked.label}*\n\n` +
+        `Um lembrete será enviado para ${session.profile.email}.\n\n` +
+        `Aqui está um resumo do seu cadastro:\n` +
+        `• Nome: ${session.profile.name}\n• Nascimento: ${session.profile.dob}\n` +
+        `• Cidade: ${session.profile.city}\n• E-mail: ${session.profile.email}\n` +
+        `• Medicamentos: ${session.profile.medications}\n\nPosso ajudar com mais alguma coisa?`;
       session.step = "complete";
       break;
     case "complete":
-      if (input.toLowerCase() === "restart") {
+      if (input.toLowerCase() === "reiniciar") {
         delete sessions[senderId];
         const fresh = getSession(senderId);
         fresh.step = "awaiting_name";
         fresh.updatedAt = new Date().toISOString();
-        reply = "Starting over! 👋\nTo get started, could I have your full name?";
+        reply = "Recomeçando! 👋\nQual é o seu nome completo?";
         return { reply, session: fresh };
       }
-      reply = "You're all set! Send \"restart\" to begin again.";
+      reply = "Tudo certo! Envie \"reiniciar\" para começar novamente.";
       break;
   }
 
