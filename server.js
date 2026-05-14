@@ -3,7 +3,7 @@ const express = require("express");
 const Anthropic = require("@anthropic-ai/sdk");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { MongoClient, ObjectId } = require("mongodb");
+const { MongoClient } = require("mongodb");
 
 const app = express();
 app.use(express.json());
@@ -12,10 +12,16 @@ app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
 const JWT_SECRET = process.env.JWT_SECRET || "praxi_jwt_secret_change_in_production";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "gustavowolkerz@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const MONGODB_URI = process.env.MONGODB_URI;
 const anthropic = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const PIX_KEY = "e05184c4-76ef-4a6c-8465-6a1068ee5765";
+const CADASTRO_URL = "https://gustavogalioti.github.io/praxi-site/";
+const PRECO_MEDICO = 200;
+const PRECO_CONSULTORIO_BASE = 300;
+const PRECO_CONSULTORIO_POR_PROF = 150;
 
 // ─── MongoDB ──────────────────────────────────────────────────────────────────
 
@@ -26,37 +32,33 @@ async function connectDB() {
   const client = new MongoClient(MONGODB_URI);
   await client.connect();
   db = client.db("praxi");
-  patientsCol  = db.collection("patients");
-  clientsCol   = db.collection("clients");
-  sessionsCol  = db.collection("sessions");
-  insightsCol  = db.collection("insights");
-  console.log("MongoDB conectado ✅");
+  patientsCol = db.collection("patients");
+  clientsCol  = db.collection("clients");
+  sessionsCol = db.collection("sessions");
+  insightsCol = db.collection("insights");
+  console.log("MongoDB conectado");
 
-  // Seed inicial de pacientes se coleção estiver vazia
   const count = await patientsCol.countDocuments();
   if (count === 0) {
     await patientsCol.insertMany([
-      { id: "p001", name: "Alice Johnson", dob: "1992-03-05", city: "New York", email: "alice@example.com", medications: "Metformin 500mg, Lisinopril 10mg", diagnosis: "Type 2 Diabetes", appointment: "2026-06-10", registeredAt: "2026-04-15T00:00:00.000Z", source: "manual" },
-      { id: "p002", name: "Bob Martinez", dob: "1968-07-22", city: "Los Angeles", email: "bob@example.com", medications: "Amlodipine 5mg, Atorvastatin 20mg", diagnosis: "Hypertension", appointment: "2026-05-20", registeredAt: "2026-03-22T00:00:00.000Z", source: "manual" },
-      { id: "p003", name: "Carol Lee", dob: "1981-11-30", city: "Chicago", email: "carol@example.com", medications: "Albuterol inhaler, Fluticasone inhaler", diagnosis: "Asthma", appointment: "2026-07-01", registeredAt: "2026-05-01T00:00:00.000Z", source: "manual" },
+      { id: "p001", name: "Alice Johnson", dob: "1992-03-05", city: "Sao Paulo", email: "alice@example.com", medications: "Metformina 500mg", diagnosis: "Diabetes Tipo 2", appointment: "2026-06-10", registeredAt: new Date().toISOString(), source: "manual" },
+      { id: "p002", name: "Bob Martinez", dob: "1968-07-22", city: "Rio de Janeiro", email: "bob@example.com", medications: "Anlodipino 5mg", diagnosis: "Hipertensao", appointment: "2026-05-20", registeredAt: new Date().toISOString(), source: "manual" },
     ]);
-    console.log("Pacientes iniciais inseridos ✅");
   }
 }
 
-// ─── Sessions (in-memory para velocidade, persistidas no Mongo) ───────────────
+// ─── Sessions ─────────────────────────────────────────────────────────────────
 
 const sessions = {};
 
 async function getSession(senderId) {
   if (!sessions[senderId]) {
-    // Tenta recuperar do banco
     const saved = await sessionsCol.findOne({ senderId });
     if (saved) {
       sessions[senderId] = saved;
     } else {
       sessions[senderId] = {
-        senderId, step: "new", profile: {},
+        senderId, step: "inicio", profile: {},
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
     }
@@ -72,125 +74,243 @@ async function saveSession(session) {
   );
 }
 
-// ─── Conversation engine ──────────────────────────────────────────────────────
+// ─── Slots de agenda ──────────────────────────────────────────────────────────
 
-function generateSlots(count = 6) {
+function generateSlots(count) {
+  count = count || 6;
   const slots = [];
-  const allowedDays = [1, 2, 3, 4, 5]; // segunda a sexta
+  const allowedDays = [1, 2, 3, 4, 5];
   const times = ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"];
   const cursor = new Date();
   cursor.setDate(cursor.getDate() + 1);
   while (slots.length < count) {
     if (allowedDays.includes(cursor.getDay())) {
-      times.forEach(t => {
-        if (slots.length < count) {
-          const [h, m] = t.split(":");
-          const dt = new Date(cursor);
-          dt.setHours(parseInt(h), parseInt(m), 0, 0);
-          slots.push({
-            index: slots.length + 1,
-            label: dt.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + ` às ${t}`,
-            isoDate: dt.toISOString().split("T")[0],
-            time: t,
-          });
-        }
-      });
+      for (var ti = 0; ti < times.length; ti++) {
+        if (slots.length >= count) break;
+        var t = times[ti];
+        var parts = t.split(":");
+        var dt = new Date(cursor);
+        dt.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
+        slots.push({
+          index: slots.length + 1,
+          label: dt.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + " as " + t,
+          isoDate: dt.toISOString().split("T")[0],
+          time: t,
+        });
+      }
     }
     cursor.setDate(cursor.getDate() + 1);
   }
   return slots;
 }
 
+// ─── Mensagens reutilizaveis ──────────────────────────────────────────────────
+
+function msgInicio() {
+  return "Ola! Sou o *Praxi*, assistente clinico inteligente.\n\nComo posso te ajudar hoje?\n\n*1.* Marcar uma consulta\n*2.* Conhecer e contratar o Praxi\n\nResponda com *1* ou *2*.";
+}
+
+function msgApresentacaoPraxi() {
+  return "O Praxi e um assistente de IA que trabalha para voce — medico ou clinica — automatizando atendimento, triagem de pacientes e agendamento direto pelo WhatsApp.\n\nTemos dois perfis:\n\n*1. Perfil Medico* — Para quem atua de forma independente.\nR$ " + PRECO_MEDICO + "/mes\n\n*2. Perfil Consultorio* — Para consultórios com multiplos profissionais.\nA partir de R$ " + (PRECO_CONSULTORIO_BASE + PRECO_CONSULTORIO_POR_PROF) + "/mes\n\nQual se encaixa para voce? Responda *1* ou *2*.";
+}
+
+function msgPerfilMedico() {
+  return "Perfil Medico — R$ " + PRECO_MEDICO + "/mes\n\nSou o seu assistente pessoal. Veja o que faco por voce:\n\nRecebo e triagem pacientes pelo WhatsApp 24h\nFaco o cadastro completo de cada paciente automaticamente\nGerencio sua agenda sem conflitos de horario\nGero insights clinicos com IA para apoiar suas decisoes\nVoce tem um painel completo com todos os dados\n\nSou o assistente que nunca falta, nunca erra o horario e trabalha enquanto voce dorme.\n\n*Deseja seguir para me contratar?*\nResponda *sim* para continuar.";
+}
+
+function msgPerfilConsultorio() {
+  return "Perfil Consultorio\n\nR$ " + PRECO_CONSULTORIO_BASE + "/mes (conta oficial do consultorio)\n+ R$ " + PRECO_CONSULTORIO_POR_PROF + "/mes por profissional\n\nO Praxi gerencia toda a sua equipe:\n\nUm assistente dedicado para cada profissional\nRecepcao centralizada com triagem inteligente\nAgenda individual por profissional sem conflitos\nPainel administrativo do consultorio com visao geral\nCada medico acessa seus proprios dados e pacientes\n\n*Deseja seguir para me contratar?*\nResponda *sim* para continuar.";
+}
+
+function msgProcedimentoContratacao(perfil) {
+  var descricao = perfil === "medico"
+    ? "Perfil Medico — R$ " + PRECO_MEDICO + "/mes"
+    : "Perfil Consultorio — a partir de R$ " + (PRECO_CONSULTORIO_BASE + PRECO_CONSULTORIO_POR_PROF) + "/mes";
+
+  return "Otima escolha!\n\nPara finalizar sua contratacao — " + descricao + " — siga os passos:\n\n*1.* Acesse o link de cadastro e preencha seus dados:\n" + CADASTRO_URL + "\n\n*2.* Apos o cadastro, volte aqui e me avise. Vou te passar os dados de pagamento via PIX.\n\n*3.* Com o pagamento confirmado, voce recebe o e-mail de boas-vindas com acesso e instrucoes para ativar seu Praxi.\n\nJa fez o cadastro? Me avise aqui!";
+}
+
+function msgPix(perfil) {
+  var valor = perfil === "medico"
+    ? "R$ " + PRECO_MEDICO + ",00"
+    : "R$ " + (PRECO_CONSULTORIO_BASE + PRECO_CONSULTORIO_POR_PROF) + ",00 (1 profissional)";
+
+  return "Dados para pagamento via PIX\n\n*Valor:* " + valor + "\n*Chave PIX:* " + PIX_KEY + "\n\nApos realizar o pagamento, me avise aqui confirmando. Seu acesso e liberado assim que o pagamento for confirmado.";
+}
+
+function isAfirmativo(input) {
+  return /^(sim|s|yes|quero|ok|pode|vamos|confirmo|aceito|claro|afirmativo|fiz|paguei|pago)/i.test(input.trim());
+}
+
+// ─── Engine de conversa ───────────────────────────────────────────────────────
+
 async function processMessage(senderId, text) {
   const session = await getSession(senderId);
   const input = text.trim();
-  let reply = "";
+  const low = input.toLowerCase();
+  var reply = "";
+
+  if (low === "reiniciar" || low === "menu" || low === "inicio") {
+    delete sessions[senderId];
+    await sessionsCol.deleteOne({ senderId });
+    const fresh = await getSession(senderId);
+    fresh.step = "inicio";
+    await saveSession(fresh);
+    return { reply: msgInicio(), session: fresh };
+  }
 
   switch (session.step) {
-    case "new":
-      reply = "👋 Olá! Sou o Praxi, seu assistente clínico.\nPara começar, qual é o seu nome completo?";
-      session.step = "awaiting_name";
+
+    case "inicio":
+      reply = msgInicio();
+      session.step = "aguardando_opcao_inicial";
       break;
-    case "awaiting_name":
-      if (!input) { reply = "Por favor, informe seu nome completo para continuar."; break; }
+
+    case "aguardando_opcao_inicial":
+      if (low.includes("1") || low.includes("consulta") || low.includes("marcar")) {
+        reply = "Vamos marcar sua consulta.\n\nQual e o seu *nome completo*?";
+        session.step = "consulta_nome";
+      } else if (low.includes("2") || low.includes("contratar") || low.includes("praxi")) {
+        reply = msgApresentacaoPraxi();
+        session.step = "venda_apresentacao";
+      } else {
+        reply = "Por favor, responda com *1* para marcar uma consulta ou *2* para conhecer o Praxi.\n\n" + msgInicio();
+      }
+      break;
+
+    case "consulta_nome":
+      if (!input) { reply = "Por favor, informe seu nome completo."; break; }
       session.profile.name = input;
-      reply = `Obrigado, ${input}! 📋\nQual é a sua data de nascimento? (ex: DD/MM/AAAA)`;
-      session.step = "awaiting_dob";
+      reply = "Obrigado, *" + input + "*!\n\nQual e a sua *data de nascimento*? (ex: DD/MM/AAAA)";
+      session.step = "consulta_dob";
       break;
-    case "awaiting_dob":
+
+    case "consulta_dob":
       if (!input) { reply = "Por favor, informe sua data de nascimento (DD/MM/AAAA)."; break; }
       session.profile.dob = input;
-      reply = "Entendido. 🏙️ Em qual cidade você mora?";
-      session.step = "awaiting_city";
+      reply = "Em qual *cidade* voce mora?";
+      session.step = "consulta_cidade";
       break;
-    case "awaiting_city":
+
+    case "consulta_cidade":
       if (!input) { reply = "Por favor, informe sua cidade."; break; }
       session.profile.city = input;
-      reply = "Ótimo! Qual é o seu endereço de e-mail?";
-      session.step = "awaiting_email";
+      reply = "Qual e o seu *e-mail*?";
+      session.step = "consulta_email";
       break;
-    case "awaiting_email":
-      if (!input || !input.includes("@")) { reply = "Por favor, informe um endereço de e-mail válido."; break; }
+
+    case "consulta_email":
+      if (!input || !input.includes("@")) { reply = "Por favor, informe um e-mail valido."; break; }
       session.profile.email = input;
-      reply = "Obrigado! 💊 Por favor, liste os medicamentos que você usa atualmente.\n(Você pode digitá-los separados por vírgula, ou escrever \"nenhum\".)";
-      session.step = "awaiting_medications";
+      reply = "Quais *medicamentos* voce usa atualmente?\n(Liste separados por virgula ou escreva nenhum.)";
+      session.step = "consulta_medicamentos";
       break;
-    case "awaiting_medications":
-      if (!input) { reply = "Por favor, informe seus medicamentos atuais, ou escreva \"nenhum\"."; break; }
+
+    case "consulta_medicamentos": {
+      if (!input) { reply = "Por favor, informe seus medicamentos ou escreva nenhum."; break; }
       session.profile.medications = input;
-      const slots = generateSlots(6);
+      var slots = generateSlots(6);
       session.appointmentSlots = slots;
-      reply = "✅ Seu cadastro está completo!\n\nAqui estão os horários disponíveis para consulta:\n\n" +
-        slots.map(s => `  ${s.index}. ${s.label}`).join("\n") +
-        `\n\nResponda com o número do horário de sua preferência (1–${slots.length}).`;
-      session.step = "awaiting_appointment";
+      var slotLines = slots.map(function(s) { return "  *" + s.index + ".* " + s.label; }).join("\n");
+      reply = "Cadastro completo!\n\nEscolha um horario disponivel:\n\n" + slotLines + "\n\nResponda com o *numero* do horario desejado (1 a " + slots.length + ").";
+      session.step = "consulta_horario";
       break;
-    case "awaiting_appointment":
-      const choice = parseInt(input, 10);
-      const slotList = session.appointmentSlots || [];
-      if (isNaN(choice) || choice < 1 || choice > slotList.length) {
-        reply = `Por favor, responda com um número entre 1 e ${slotList.length}.\n\n` +
-          slotList.map(s => `  ${s.index}. ${s.label}`).join("\n");
+    }
+
+    case "consulta_horario": {
+      var choiceC = parseInt(input, 10);
+      var slotListC = session.appointmentSlots || [];
+      if (isNaN(choiceC) || choiceC < 1 || choiceC > slotListC.length) {
+        reply = "Por favor, responda com um numero entre 1 e " + slotListC.length + ".\n\n" +
+          slotListC.map(function(s) { return "  *" + s.index + ".* " + s.label; }).join("\n");
         break;
       }
-      const booked = slotList[choice - 1];
+      var booked = slotListC[choiceC - 1];
       session.bookedAppointment = booked;
 
-      // Salva paciente no MongoDB
-      const patientCount = await patientsCol.countDocuments();
-      const newId = `p${String(patientCount + 1).padStart(3, "0")}`;
-      const newPatient = {
+      var patientCount = await patientsCol.countDocuments();
+      var newId = "p" + String(patientCount + 1).padStart(3, "0");
+      await patientsCol.insertOne({
         id: newId,
-        ...session.profile,
+        name: session.profile.name,
+        dob: session.profile.dob,
+        city: session.profile.city,
+        email: session.profile.email,
+        medications: session.profile.medications,
         appointment: booked.isoDate,
         appointmentTime: booked.time,
+        appointmentLabel: booked.label,
         registeredAt: new Date().toISOString(),
         source: "whatsapp",
         phone: senderId,
-      };
-      await patientsCol.insertOne(newPatient);
+      });
 
-      reply = `🗓️ Confirmado! Sua consulta está agendada para:\n*${booked.label}*\n\n` +
-        `Um lembrete será enviado para ${session.profile.email}.\n\n` +
-        `Aqui está um resumo do seu cadastro:\n` +
-        `• Nome: ${session.profile.name}\n• Nascimento: ${session.profile.dob}\n` +
-        `• Cidade: ${session.profile.city}\n• E-mail: ${session.profile.email}\n` +
-        `• Medicamentos: ${session.profile.medications}\n\nPosso ajudar com mais alguma coisa?`;
-      session.step = "complete";
+      reply = "Consulta confirmada!\n\n" + booked.label + "\n\nUm lembrete sera enviado para *" + session.profile.email + "*.\n\n" +
+        "Resumo do cadastro:\n" +
+        "Nome: " + session.profile.name + "\n" +
+        "Nascimento: " + session.profile.dob + "\n" +
+        "Cidade: " + session.profile.city + "\n" +
+        "E-mail: " + session.profile.email + "\n" +
+        "Medicamentos: " + session.profile.medications + "\n\n" +
+        "Posso ajudar com mais alguma coisa? Digite *menu* para voltar ao inicio.";
+      session.step = "completo";
       break;
-    case "complete":
-      if (input.toLowerCase() === "reiniciar") {
-        delete sessions[senderId];
-        await sessionsCol.deleteOne({ senderId });
-        const fresh = await getSession(senderId);
-        fresh.step = "awaiting_name";
-        fresh.updatedAt = new Date().toISOString();
-        await saveSession(fresh);
-        reply = "Recomeçando! 👋\nQual é o seu nome completo?";
-        return { reply, session: fresh };
+    }
+
+    case "venda_apresentacao":
+      if (low.includes("1") || low.includes("medico") || low.includes("solo") || low.includes("sozinho")) {
+        reply = msgPerfilMedico();
+        session.vendaPerfil = "medico";
+        session.step = "venda_detalhe";
+      } else if (low.includes("2") || low.includes("consultorio") || low.includes("clinica")) {
+        reply = msgPerfilConsultorio();
+        session.vendaPerfil = "consultorio";
+        session.step = "venda_detalhe";
+      } else {
+        reply = "Por favor, responda *1* para Perfil Medico ou *2* para Perfil Consultorio.\n\n" + msgApresentacaoPraxi();
       }
-      reply = "Tudo certo! Envie \"reiniciar\" para começar novamente.";
       break;
+
+    case "venda_detalhe":
+      if (isAfirmativo(input) || low.includes("contratar") || low.includes("seguir")) {
+        reply = msgProcedimentoContratacao(session.vendaPerfil);
+        session.step = "venda_aguardando_cadastro";
+      } else if (low.includes("nao") || low.includes("voltar")) {
+        reply = msgApresentacaoPraxi();
+        session.step = "venda_apresentacao";
+      } else {
+        reply = "Deseja seguir para me contratar? Responda *sim* para continuar ou *nao* para voltar.";
+      }
+      break;
+
+    case "venda_aguardando_cadastro":
+      if (low.includes("cadastr") || low.includes("preenchi") || low.includes("fiz o cadastro") || low.includes("conclu")) {
+        reply = msgPix(session.vendaPerfil);
+        session.step = "venda_aguardando_pagamento";
+      } else if (isAfirmativo(input) || low.includes("paguei") || low.includes("pago")) {
+        reply = "Pagamento recebido! Sua contratacao esta sendo processada. Em instantes voce recebera um e-mail de boas-vindas com seus dados de acesso. Obrigado por escolher o Praxi!\n\nDigite *menu* para voltar ao inicio.";
+        session.step = "completo";
+      } else {
+        reply = "Para seguir com a contratacao:\n\n*1.* Acesse o link de cadastro e preencha seus dados:\n" + CADASTRO_URL + "\n\n*2.* Apos o cadastro, volte aqui e me avise que finalizou.";
+      }
+      break;
+
+    case "venda_aguardando_pagamento":
+      if (isAfirmativo(input) || low.includes("paguei") || low.includes("pago") || low.includes("fiz") || low.includes("realizei")) {
+        reply = "Pagamento confirmado! Sua contratacao esta finalizada. Em instantes voce recebera o e-mail de boas-vindas com seus dados de acesso e instrucoes para ativar seu assistente Praxi. Obrigado!\n\nDigite *menu* para voltar ao inicio.";
+        session.step = "completo";
+      } else {
+        reply = msgPix(session.vendaPerfil) + "\n\nApos realizar o pagamento, me avise aqui!";
+      }
+      break;
+
+    case "completo":
+      reply = "Posso ajudar com mais alguma coisa? Digite *menu* para voltar ao inicio.";
+      break;
+
+    default:
+      reply = msgInicio();
+      session.step = "aguardando_opcao_inicial";
   }
 
   session.updatedAt = new Date().toISOString();
@@ -198,25 +318,22 @@ async function processMessage(senderId, text) {
   return { reply, session };
 }
 
-// ─── Shared Anthropic helper ──────────────────────────────────────────────────
+// ─── Anthropic helper ─────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT =
-  "You are Praxi Bot, a clinical decision-support assistant. " +
-  "Provide concise, evidence-based medical insights. " +
-  "Always remind users that your output is not a substitute for professional medical judgment.";
+var SYSTEM_PROMPT = "Voce e o Praxi Bot, um assistente de apoio a decisao clinica. Forneca insights concisos e baseados em evidencias. Sempre lembre que suas respostas nao substituem o julgamento medico profissional.";
 
 async function generateInsight(prompt, patientId, context) {
-  const userMessage = context ? `Patient context:\n${context}\n\n${prompt}` : prompt;
-  const message = await anthropic.messages.create({
-    model: "claude-opus-4-5",
+  var userMessage = context ? "Contexto do paciente:\n" + context + "\n\n" + prompt : prompt;
+  var message = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
     max_tokens: 1024,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
   });
-  const responseText = message.content[0].type === "text" ? message.content[0].text : "";
-  const record = {
-    id: `ins_${Date.now()}`, patientId: patientId || null,
-    prompt, context: context || null, response: responseText,
+  var responseText = message.content[0].type === "text" ? message.content[0].text : "";
+  var record = {
+    id: "ins_" + Date.now(), patientId: patientId || null,
+    prompt: prompt, context: context || null, response: responseText,
     model: message.model, createdAt: new Date().toISOString(),
   };
   await insightsCol.insertOne(record);
@@ -226,106 +343,61 @@ async function generateInsight(prompt, patientId, context) {
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 
 function verifyJWT(req, res, next) {
-  const auth = req.headers.authorization;
+  var auth = req.headers.authorization;
   if (!auth || !auth.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+    return res.status(401).json({ error: "Token de autorizacao ausente ou invalido" });
   }
   try {
     req.user = jwt.verify(auth.slice(7), JWT_SECRET);
     next();
   } catch (err) {
-    return res.status(401).json({ error: "Invalid or expired token" });
+    return res.status(401).json({ error: "Token invalido ou expirado" });
   }
 }
 
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
-    return res.status(403).json({ error: "Admin access required" });
+    return res.status(403).json({ error: "Acesso restrito ao administrador" });
   }
   next();
 }
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
+// ─── Rotas ────────────────────────────────────────────────────────────────────
 
-// Privacy policy
-app.get("/privacy", (_req, res) => {
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Política de Privacidade — Praxi Bot</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #1a1a2e; line-height: 1.7; }
-    header { background: #0d6efd; color: #fff; padding: 48px 24px 36px; text-align: center; }
-    header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
-    header p  { font-size: 1rem; opacity: 0.85; }
-    main { max-width: 780px; margin: 40px auto; padding: 0 24px 60px; }
-    section { margin-bottom: 40px; }
-    h2 { font-size: 1.2rem; font-weight: 700; color: #0d6efd; border-left: 4px solid #0d6efd; padding-left: 12px; margin-bottom: 14px; }
-    p { margin-bottom: 12px; font-size: 0.97rem; }
-    ul { padding-left: 20px; margin-bottom: 12px; }
-    ul li { margin-bottom: 6px; font-size: 0.97rem; }
-    .badge { display: inline-block; background: #e8f0fe; color: #0d6efd; font-size: 0.82rem; font-weight: 600; padding: 2px 10px; border-radius: 20px; margin-bottom: 16px; }
-    .card { background: #fff; border-radius: 12px; padding: 28px 32px; box-shadow: 0 2px 12px rgba(0,0,0,.07); }
-    footer { text-align: center; padding: 24px; font-size: 0.82rem; color: #888; border-top: 1px solid #e0e0e0; }
-  </style>
-</head>
-<body>
-<header>
-  <h1>Política de Privacidade</h1>
-  <p>Praxi Bot — Assistente WhatsApp para médicos e clínicas no Brasil</p>
-</header>
-<main>
-  <section><div class="card">
-    <span class="badge">Última atualização: maio de 2026</span>
-    <p>A <strong>Praxi Bot</strong> é uma solução de suporte à decisão clínica via WhatsApp, em conformidade com a <strong>LGPD (Lei nº 13.709/2018)</strong>.</p>
-  </div></section>
-</main>
-<footer>&copy; 2026 Praxi Bot. Todos os direitos reservados.</footer>
-</body>
-</html>`);
-});
+app.get("/api/healthz", function(_req, res) { res.json({ status: "ok" }); });
 
-// Health
-app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
-
-// Webhook verification
-app.get("/webhook", (req, res) => {
-  const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
+app.get("/webhook", function(req, res) {
+  var mode = req.query["hub.mode"];
+  var token = req.query["hub.verify_token"];
+  var challenge = req.query["hub.challenge"];
   if (mode === "subscribe" && token === WEBHOOK_VERIFY_TOKEN) {
     res.status(200).send(challenge);
   } else {
-    res.status(403).json({ error: "Forbidden: verification token mismatch" });
+    res.status(403).json({ error: "Token de verificacao invalido" });
   }
 });
 
-// Webhook message intake + conversation flow
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", async function(req, res) {
   res.status(200).send("OK");
-  const body = req.body;
+  var body = req.body;
   if (!body.object) return;
-
-  const entry = body.entry?.[0];
-  const change = entry?.changes?.[0];
-  const value = change?.value;
-  const message = value?.messages?.[0];
-
+  var entry = body.entry && body.entry[0];
+  var change = entry && entry.changes && entry.changes[0];
+  var value = change && change.value;
+  var message = value && value.messages && value.messages[0];
   if (!message) return;
-
-  const from = message.from;
-  const text = message.text?.body || "";
+  var from = message.from;
+  var text = (message.text && message.text.body) || "";
   if (!text) return;
 
-  const { reply } = await processMessage(from, text);
+  var result = await processMessage(from, text);
+  var reply = result.reply;
 
   try {
-    await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+    await fetch("https://graph.facebook.com/v20.0/" + process.env.WHATSAPP_PHONE_ID + "/messages", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Authorization": "Bearer " + process.env.WHATSAPP_TOKEN,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -340,237 +412,158 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Webhook sessions
-app.get("/api/webhook/sessions", async (_req, res) => {
-  const all = await sessionsCol.find({}).toArray();
+app.get("/api/webhook/sessions", async function(_req, res) {
+  var all = await sessionsCol.find({}).toArray();
   res.json({ sessions: all, total: all.length });
 });
 
-// Patients
-app.get("/api/patients", async (_req, res) => {
-  const all = await patientsCol.find({}).toArray();
+app.get("/api/patients", async function(_req, res) {
+  var all = await patientsCol.find({}).toArray();
   res.json({ patients: all, total: all.length });
 });
 
-app.get("/api/patients/:id", async (req, res) => {
-  const patient = await patientsCol.findOne({ id: req.params.id });
-  if (!patient) return res.status(404).json({ error: "Patient not found" });
+app.get("/api/patients/:id", async function(req, res) {
+  var patient = await patientsCol.findOne({ id: req.params.id });
+  if (!patient) return res.status(404).json({ error: "Paciente nao encontrado" });
   res.json(patient);
 });
 
-app.post("/api/patients", async (req, res) => {
-  const body = req.body;
-  let name, dob, city, email, medications, diagnosis, appointment, source = "manual";
-
-  if (body.fromSession) {
-    const session = sessions[body.fromSession] || await sessionsCol.findOne({ senderId: body.fromSession });
-    if (!session) return res.status(404).json({ error: `No session found for sender "${body.fromSession}"` });
-    if (session.step !== "complete") return res.status(422).json({ error: "Session is not complete yet", step: session.step });
-    ({ name, dob, city, email, medications } = session.profile);
-    appointment = session.bookedAppointment?.isoDate;
-    source = "session";
-  } else {
-    ({ name, dob, city, email, medications, diagnosis, appointment } = body);
-  }
-
-  const missing = ["name", "dob", "city", "email", "medications"].filter(f => !eval(f));
-  if (missing.length) return res.status(400).json({ error: "Missing required fields", missing });
-
-  const count = await patientsCol.countDocuments();
-  const id = `p${String(count + 1).padStart(3, "0")}`;
-  const patient = { id, name, dob, city, email, medications, diagnosis, appointment, registeredAt: new Date().toISOString(), source };
+app.post("/api/patients", async function(req, res) {
+  var body = req.body;
+  var missing = ["name", "dob", "city", "email", "medications"].filter(function(f) { return !body[f]; });
+  if (missing.length) return res.status(400).json({ error: "Campos obrigatorios ausentes", missing: missing });
+  var count = await patientsCol.countDocuments();
+  var id = "p" + String(count + 1).padStart(3, "0");
+  var patient = { id: id, name: body.name, dob: body.dob, city: body.city, email: body.email, medications: body.medications, diagnosis: body.diagnosis, appointment: body.appointment, registeredAt: new Date().toISOString(), source: "manual" };
   await patientsCol.insertOne(patient);
   res.status(201).json(patient);
 });
 
-app.get("/api/patients/:id/insight/history", async (req, res) => {
-  const patient = await patientsCol.findOne({ id: req.params.id });
-  if (!patient) return res.status(404).json({ error: "Patient not found" });
-  const records = await insightsCol.find({ patientId: patient.id }).toArray();
-  res.json({ patientId: patient.id, insights: records, total: records.length });
-});
-
-app.post("/api/patients/:id/insight", async (req, res) => {
-  const patient = await patientsCol.findOne({ id: req.params.id });
-  if (!patient) return res.status(404).json({ error: "Patient not found" });
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: "prompt is required" });
-
-  const context = [
-    `Name: ${patient.name}`, `Date of birth: ${patient.dob}`,
-    `City: ${patient.city}`, `Email: ${patient.email}`,
-    `Current medications: ${patient.medications}`,
-    patient.diagnosis ? `Diagnosis: ${patient.diagnosis}` : null,
-    patient.appointment ? `Next appointment: ${patient.appointment}` : null,
-  ].filter(Boolean).join("\n");
-
+app.post("/api/patients/:id/insight", async function(req, res) {
+  var patient = await patientsCol.findOne({ id: req.params.id });
+  if (!patient) return res.status(404).json({ error: "Paciente nao encontrado" });
+  var prompt = req.body.prompt;
+  if (!prompt) return res.status(400).json({ error: "prompt e obrigatorio" });
+  var context = ["Nome: " + patient.name, "Nascimento: " + patient.dob, "Cidade: " + patient.city, "E-mail: " + patient.email, "Medicamentos: " + patient.medications, patient.diagnosis ? "Diagnostico: " + patient.diagnosis : null, patient.appointment ? "Proxima consulta: " + patient.appointment : null].filter(Boolean).join("\n");
   try {
-    const record = await generateInsight(prompt, patient.id, context);
-    res.json({ patient, insight: record });
+    var record = await generateInsight(prompt, patient.id, context);
+    res.json({ patient: patient, insight: record });
   } catch (err) {
-    res.status(502).json({ error: "Anthropic API error", detail: err.message });
+    res.status(502).json({ error: "Erro na API Anthropic", detail: err.message });
   }
 });
 
-// Insights
-app.post("/api/insight", async (req, res) => {
-  const { prompt, patientId, context } = req.body;
-  if (!prompt) return res.status(400).json({ error: "prompt is required" });
+app.get("/api/patients/:id/insight/history", async function(req, res) {
+  var records = await insightsCol.find({ patientId: req.params.id }).toArray();
+  res.json({ patientId: req.params.id, insights: records, total: records.length });
+});
+
+app.post("/api/insight", async function(req, res) {
+  var prompt = req.body.prompt;
+  if (!prompt) return res.status(400).json({ error: "prompt e obrigatorio" });
   try {
-    const record = await generateInsight(prompt, patientId || null, context || null);
+    var record = await generateInsight(prompt, req.body.patientId || null, req.body.context || null);
     res.json(record);
   } catch (err) {
-    res.status(502).json({ error: "Anthropic API error", detail: err.message });
+    res.status(502).json({ error: "Erro na API Anthropic", detail: err.message });
   }
 });
 
-app.get("/api/insight/history", async (_req, res) => {
-  const all = await insightsCol.find({}).toArray();
+app.get("/api/insight/history", async function(_req, res) {
+  var all = await insightsCol.find({}).toArray();
   res.json({ insights: all, total: all.length });
 });
 
-// Simulate
-app.post("/api/simulate", async (req, res) => {
-  const { phone, messages: msgs } = req.body;
-  if (!phone || typeof phone !== "string") return res.status(400).json({ error: "phone is required" });
-  if (!Array.isArray(msgs) || !msgs.length) return res.status(400).json({ error: "messages must be a non-empty array" });
-
-  delete sessions[phone];
-  await sessionsCol.deleteOne({ senderId: phone });
-  const log = [];
-  for (let i = 0; i < msgs.length; i++) {
-    const { reply, session } = await processMessage(phone, msgs[i]);
-    log.push({ turn: i + 1, sender: phone, message: msgs[i], botReply: reply, step: session.step });
-    if (session.step === "complete") break;
-  }
-  res.json({ phone, turns: log.length, finalStep: log[log.length - 1]?.step, conversation: log });
-});
-
-// ─── Auth routes ──────────────────────────────────────────────────────────────
-
-app.post("/api/auth/register", async (req, res) => {
-  const { name, email, password, type, crm, specialty, phone, plan } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: "name, email and password are required" });
-  }
-  const existing = await clientsCol.findOne({ email });
-  if (existing) return res.status(409).json({ error: "Email already registered" });
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const id = `cl_${Date.now()}`;
-  const nextBillingDate = new Date();
-  nextBillingDate.setDate(nextBillingDate.getDate() + 30);
-
-  const client = {
-    id, name, email, passwordHash,
-    type: type || "solo",
-    crm: crm || null,
-    specialty: specialty || null,
-    phone: phone || null,
-    createdAt: new Date().toISOString(),
-    status: "active",
-    plan: plan || "free",
-    nextBilling: nextBillingDate.toISOString(),
-  };
+app.post("/api/auth/register", async function(req, res) {
+  var body = req.body;
+  if (!body.name || !body.email || !body.password) return res.status(400).json({ error: "name, email e password sao obrigatorios" });
+  var existing = await clientsCol.findOne({ email: body.email });
+  if (existing) return res.status(409).json({ error: "E-mail ja cadastrado" });
+  var passwordHash = await bcrypt.hash(body.password, 10);
+  var id = "cl_" + Date.now();
+  var nextBilling = new Date();
+  nextBilling.setDate(nextBilling.getDate() + 30);
+  var client = { id: id, name: body.name, email: body.email, passwordHash: passwordHash, type: body.type || "solo", crm: body.crm || null, specialty: body.specialty || null, phone: body.phone || null, createdAt: new Date().toISOString(), status: "active", plan: body.plan || "free", nextBilling: nextBilling.toISOString() };
   await clientsCol.insertOne(client);
-  const { passwordHash: _, ...safe } = client;
+  var safe = Object.assign({}, client);
+  delete safe.passwordHash;
   res.status(201).json(safe);
 });
 
-app.post("/api/auth/login", async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: "email and password are required" });
-  }
-
+app.post("/api/auth/login", async function(req, res) {
+  var email = req.body.email;
+  var password = req.body.password;
+  if (!email || !password) return res.status(400).json({ error: "email e password sao obrigatorios" });
   if (ADMIN_EMAIL && ADMIN_PASSWORD && email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    const token = jwt.sign({ role: "admin", email }, JWT_SECRET, { expiresIn: "8h" });
-    return res.json({ token, role: "admin", expiresIn: "8h" });
+    var token = jwt.sign({ role: "admin", email: email }, JWT_SECRET, { expiresIn: "8h" });
+    return res.json({ token: token, role: "admin", expiresIn: "8h" });
   }
-
-  const client = await clientsCol.findOne({ email });
-  if (!client) return res.status(401).json({ error: "Invalid credentials" });
-
-  const valid = await bcrypt.compare(password, client.passwordHash);
-  if (!valid) return res.status(401).json({ error: "Invalid credentials" });
-
-  if (client.status === "suspended") {
-    return res.status(403).json({ error: "Account suspended. Contact support." });
-  }
-
-  const token = jwt.sign({ role: "client", id: client.id, email }, JWT_SECRET, { expiresIn: "8h" });
-  const { passwordHash: _, ...safe } = client;
-  res.json({ token, role: "client", expiresIn: "8h", client: safe });
+  var client = await clientsCol.findOne({ email: email });
+  if (!client) return res.status(401).json({ error: "Credenciais invalidas" });
+  var valid = await bcrypt.compare(password, client.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Credenciais invalidas" });
+  if (client.status === "suspended") return res.status(403).json({ error: "Conta suspensa." });
+  var clientToken = jwt.sign({ role: "client", id: client.id, email: email }, JWT_SECRET, { expiresIn: "8h" });
+  var safe = Object.assign({}, client);
+  delete safe.passwordHash;
+  res.json({ token: clientToken, role: "client", expiresIn: "8h", client: safe });
 });
 
-// ─── Client self-service routes ───────────────────────────────────────────────
-
-app.get("/api/clients/me", verifyJWT, async (req, res) => {
-  if (req.user.role !== "client") return res.status(403).json({ error: "This route is for client accounts only" });
-  const client = await clientsCol.findOne({ id: req.user.id });
-  if (!client) return res.status(404).json({ error: "Client not found" });
-  const { passwordHash: _, ...safe } = client;
+app.get("/api/clients/me", verifyJWT, async function(req, res) {
+  if (req.user.role !== "client") return res.status(403).json({ error: "Rota apenas para clientes" });
+  var client = await clientsCol.findOne({ id: req.user.id });
+  if (!client) return res.status(404).json({ error: "Cliente nao encontrado" });
+  var safe = Object.assign({}, client);
+  delete safe.passwordHash;
   res.json(safe);
 });
 
-app.patch("/api/clients/me", verifyJWT, async (req, res) => {
-  if (req.user.role !== "client") return res.status(403).json({ error: "This route is for client accounts only" });
-  const allowed = ["name", "phone", "specialty", "crm"];
-  const updates = {};
-  for (const field of allowed) {
-    if (req.body[field] !== undefined) updates[field] = req.body[field];
-  }
-  if (!Object.keys(updates).length) return res.status(400).json({ error: "No updatable fields provided", allowed });
+app.patch("/api/clients/me", verifyJWT, async function(req, res) {
+  if (req.user.role !== "client") return res.status(403).json({ error: "Rota apenas para clientes" });
+  var allowed = ["name", "phone", "specialty", "crm"];
+  var updates = {};
+  allowed.forEach(function(f) { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+  if (!Object.keys(updates).length) return res.status(400).json({ error: "Nenhum campo valido para atualizar" });
   await clientsCol.updateOne({ id: req.user.id }, { $set: updates });
-  const client = await clientsCol.findOne({ id: req.user.id });
-  const { passwordHash: _, ...safe } = client;
+  var client = await clientsCol.findOne({ id: req.user.id });
+  var safe = Object.assign({}, client);
+  delete safe.passwordHash;
   res.json({ updated: Object.keys(updates), client: safe });
 });
 
-// ─── Admin routes ─────────────────────────────────────────────────────────────
-
-app.get("/api/admin/clients", verifyJWT, adminOnly, async (_req, res) => {
-  const all = await clientsCol.find({}).toArray();
-  const safe = all.map(({ passwordHash: _, ...c }) => c);
-  res.json({ clients: safe, total: safe.length });
+app.get("/api/admin/clients", verifyJWT, adminOnly, async function(_req, res) {
+  var all = await clientsCol.find({}).toArray();
+  res.json({ clients: all.map(function(c) { var s = Object.assign({}, c); delete s.passwordHash; return s; }), total: all.length });
 });
 
-app.patch("/api/admin/clients/:id", verifyJWT, adminOnly, async (req, res) => {
-  const { email, plan, status } = req.body;
-  const updates = {};
-  if (email !== undefined) updates.email = email;
-  if (plan !== undefined) updates.plan = plan;
-  if (status !== undefined) updates.status = status;
+app.patch("/api/admin/clients/:id", verifyJWT, adminOnly, async function(req, res) {
+  var updates = {};
+  if (req.body.email !== undefined) updates.email = req.body.email;
+  if (req.body.plan !== undefined) updates.plan = req.body.plan;
+  if (req.body.status !== undefined) updates.status = req.body.status;
   await clientsCol.updateOne({ id: req.params.id }, { $set: updates });
-  const client = await clientsCol.findOne({ id: req.params.id });
-  if (!client) return res.status(404).json({ error: "Client not found" });
-  const { passwordHash: _, ...safe } = client;
+  var client = await clientsCol.findOne({ id: req.params.id });
+  if (!client) return res.status(404).json({ error: "Cliente nao encontrado" });
+  var safe = Object.assign({}, client);
+  delete safe.passwordHash;
   res.json(safe);
 });
 
-app.delete("/api/admin/clients/:id", verifyJWT, adminOnly, async (req, res) => {
-  const client = await clientsCol.findOne({ id: req.params.id });
-  if (!client) return res.status(404).json({ error: "Client not found" });
+app.delete("/api/admin/clients/:id", verifyJWT, adminOnly, async function(req, res) {
+  var client = await clientsCol.findOne({ id: req.params.id });
+  if (!client) return res.status(404).json({ error: "Cliente nao encontrado" });
   await clientsCol.updateOne({ id: req.params.id }, { $set: { status: "suspended" } });
-  const updated = await clientsCol.findOne({ id: req.params.id });
-  const { passwordHash: _, ...safe } = updated;
-  res.json({ message: "Client suspended successfully", client: safe });
+  res.json({ message: "Cliente suspenso com sucesso" });
 });
 
-// ─── Register phone (Meta) ────────────────────────────────────────────────────
-
-app.get("/api/register-phone", async (req, res) => {
+app.get("/api/register-phone", async function(_req, res) {
   try {
-    const response = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/register`, {
+    var response = await fetch("https://graph.facebook.com/v20.0/" + process.env.WHATSAPP_PHONE_ID + "/register", {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Authorization": "Bearer " + process.env.WHATSAPP_TOKEN, "Content-Type": "application/json" },
       body: JSON.stringify({ messaging_product: "whatsapp", pin: "000000" }),
     });
-    const data = await response.json();
-    res.json(data);
+    res.json(await response.json());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -578,9 +571,9 @@ app.get("/api/register-phone", async (req, res) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-connectDB().then(() => {
-  app.listen(PORT, () => console.log(`Praxi Bot running on port ${PORT}`));
-}).catch(err => {
+connectDB().then(function() {
+  app.listen(PORT, function() { console.log("Praxi Bot running on port " + PORT); });
+}).catch(function(err) {
   console.error("Falha ao conectar MongoDB:", err);
   process.exit(1);
 });
