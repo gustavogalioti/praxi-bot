@@ -1,6 +1,6 @@
 {
   "name": "praxi-bot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Clinical decision-support webhook server with AI-powered insights via Anthropic",
   "main": "server.js",
   "scripts": {
